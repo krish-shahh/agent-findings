@@ -137,12 +137,14 @@ echo "  Without distillation: the reader and CLI still work, but"
 echo "  nothing gets saved to the store and the memory never grows."
 echo "─────────────────────────────────────────────────────────────"
 
-# Default yes. Non-interactive installs (curl | bash) also default yes.
+# Ask interactively. Non-interactive installs (curl | bash) default yes and say so.
 if [ -t 0 ]; then
   printf "  Enable now? [Y/n] "
   read -r _answer
 else
   _answer="Y"
+  echo "  Non-interactive install — enabling distillation by default."
+  echo "  To disable: remove AGENT_FINDINGS_ENABLED from your shell profile."
 fi
 
 case "${_answer:-Y}" in
