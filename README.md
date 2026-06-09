@@ -18,7 +18,7 @@ Requires `jq`. On macOS: `brew install jq`. Distillation uses the agent CLI you 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/krish-shahh/agent-findings/main/install.sh | bash
 ```
-Restart any running Claude Code sessions. That's it — both hooks register automatically.
+The installer will ask whether to enable distillation (recommended — say yes). Restart any running Claude Code sessions and you're done.
 
 **Codex** (after running the Claude Code install above)
 ```bash

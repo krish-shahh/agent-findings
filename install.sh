@@ -4,10 +4,12 @@
 #
 # Idempotent. Safe to re-run. It:
 #   1. creates the store at ~/.agent-findings with a seeded index/stats
-#   2. installs the two hooks into ~/.claude/hooks
+#   2. installs hooks into ~/.claude/hooks and skill into ~/.claude/skills
 #   3. installs the `agent-findings` CLI into ~/.local/bin
-#   4. registers both hooks in ~/.claude/settings.json (preserving everything
+#   4. registers hooks in ~/.claude/settings.json (preserving everything
 #      already there; a timestamped backup is written first)
+#   5. prompts to enable distillation and writes AGENT_FINDINGS_ENABLED=1
+#      to the user's shell profile if they agree
 
 set -euo pipefail
 
@@ -106,6 +108,60 @@ jq \
        then .hooks.SessionStart += [ { "hooks": [ { "type": "command", "command": $init } ] } ]
        else . end)
 ' "$SETTINGS" >"$tmp" && mv "$tmp" "$SETTINGS"
+
+# 5. Distillation opt-in -------------------------------------------------------
+# Detect shell profile. Prefer the running shell; fall back to zsh (macOS default).
+case "${SHELL:-}" in
+  */zsh)  PROFILE="$HOME/.zshrc" ;;
+  */bash) PROFILE="$HOME/.bashrc" ;;
+  *)      PROFILE="$HOME/.zshrc" ;;
+esac
+
+echo
+echo "─────────────────────────────────────────────────────────────"
+echo "Enable distillation? (recommended)"
+echo
+echo "  When enabled, /distill saves what you learned at the end of"
+echo "  each session — building a shared memory that grows over time"
+echo "  and is injected before every future task."
+echo
+echo "  Distillation runs inside your active session using your"
+echo "  existing Claude Code subscription. No separate API key needed."
+echo
+echo "  Note: as of June 15 2026 Anthropic meters headless claude"
+echo "  calls from a separate credit pool (Pro: \$20/month). The"
+echo "  /distill skill runs in-session and is NOT affected by this —"
+echo "  it costs no more than your normal usage."
+echo
+echo "  Without distillation: the reader and CLI still work, but"
+echo "  nothing gets saved to the store and the memory never grows."
+echo "─────────────────────────────────────────────────────────────"
+
+# Default yes. Non-interactive installs (curl | bash) also default yes.
+if [ -t 0 ]; then
+  printf "  Enable now? [Y/n] "
+  read -r _answer
+else
+  _answer="Y"
+fi
+
+case "${_answer:-Y}" in
+  [Yy]*|"")
+    if grep -q 'AGENT_FINDINGS_ENABLED' "$PROFILE" 2>/dev/null; then
+      say "distillation already set in $PROFILE"
+    else
+      printf '\nexport AGENT_FINDINGS_ENABLED=1  # agent-findings\n' >> "$PROFILE"
+      say "distillation  -> enabled (added to $PROFILE)"
+    fi
+    ;;
+  *)
+    echo
+    echo "  Distillation left off."
+    echo "  Without it, no findings will be saved and the reader will"
+    echo "  have nothing to inject — agent-findings will be a no-op."
+    echo "  To enable later: export AGENT_FINDINGS_ENABLED=1"
+    ;;
+esac
 
 echo
 echo "Done. Restart any running Claude Code sessions to load the hooks."
