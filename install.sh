@@ -4,7 +4,8 @@
 #
 # Idempotent. Safe to re-run. It:
 #   1. creates the store at ~/.agent-findings with a seeded index/stats
-#   2. installs hooks into ~/.claude/hooks and skill into ~/.claude/skills
+#   2. installs hooks into ~/.agent-findings/hooks (agent-neutral location)
+#      and the /distill skill into ~/.claude/skills
 #   3. installs the `agent-findings` CLI into ~/.local/bin
 #   4. registers hooks in ~/.claude/settings.json (preserving everything
 #      already there; a timestamped backup is written first)
@@ -16,7 +17,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENT_FINDINGS_HOME="${AGENT_FINDINGS_HOME:-$HOME/.agent-findings}"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-HOOKS_DIR="$CLAUDE_DIR/hooks"
+HOOKS_DIR="$AGENT_FINDINGS_HOME/hooks"
 SETTINGS="$CLAUDE_DIR/settings.json"
 BIN_DIR="$HOME/.local/bin"
 
@@ -67,10 +68,10 @@ backup="$SETTINGS.bak.$(date -u +%Y%m%d%H%M%S)"
 cp "$SETTINGS" "$backup"
 say "backup       -> $backup"
 
-WRITER_CMD="~/.claude/hooks/findings-writer.sh"
-READER_CMD="~/.claude/hooks/findings-reader.sh"
-INIT_CMD="~/.claude/hooks/findings-session-init.sh"
-GUARD_CMD="~/.claude/hooks/findings-exit-guard.sh"
+WRITER_CMD="$AGENT_FINDINGS_HOME/hooks/findings-writer.sh"
+READER_CMD="$AGENT_FINDINGS_HOME/hooks/findings-reader.sh"
+INIT_CMD="$AGENT_FINDINGS_HOME/hooks/findings-session-init.sh"
+GUARD_CMD="$AGENT_FINDINGS_HOME/hooks/findings-exit-guard.sh"
 
 tmp="$SETTINGS.tmp.$$"
 jq \

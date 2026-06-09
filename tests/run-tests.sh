@@ -201,6 +201,64 @@ check "guard is a no-op when AGENT_FINDINGS_ENABLED=0" \
   "printf '%s' '{\"prompt\":\"/exit\",\"session_id\":\"sess-no-sentinel\"}' \
     | AGENT_FINDINGS_ENABLED=0 \"$GUARD\""
 
+# --- 14. install.sh: hooks in neutral agent-findings dir --------------------
+echo "[14] install.sh: hooks written to agent-findings/hooks (not claude/hooks)"
+
+INST_HOME="$(mktemp -d)"
+INST_STORE="$INST_HOME/.agent-findings"
+INST_CLAUDE="$INST_HOME/.claude"
+INST_BIN="$INST_HOME/.local/bin"
+
+# Run non-interactively (no TTY → defaults to enabling distillation).
+# Suppress output; we test the filesystem state, not stdout.
+HOME="$INST_HOME" \
+AGENT_FINDINGS_HOME="$INST_STORE" \
+CLAUDE_CONFIG_DIR="$INST_CLAUDE" \
+  bash "$REPO/install.sh" >/dev/null 2>&1
+
+check "install: hooks dir inside agent-findings"    "[ -d \"$INST_STORE/hooks\" ]"
+check "install: writer in agent-findings/hooks"     "[ -f \"$INST_STORE/hooks/findings-writer.sh\" ]"
+check "install: reader in agent-findings/hooks"     "[ -f \"$INST_STORE/hooks/findings-reader.sh\" ]"
+check "install: session-init in agent-findings/hooks" "[ -f \"$INST_STORE/hooks/findings-session-init.sh\" ]"
+check "install: exit-guard in agent-findings/hooks" "[ -f \"$INST_STORE/hooks/findings-exit-guard.sh\" ]"
+check "install: hooks NOT in claude/hooks"          "[ ! -d \"$INST_CLAUDE/hooks\" ]"
+check "install: settings.json refs agent-findings path" \
+  "grep -q 'agent-findings/hooks' \"$INST_CLAUDE/settings.json\""
+check "install: skill still in claude/skills"       "[ -f \"$INST_CLAUDE/skills/distill.md\" ]"
+check "install: distillation flag written to profile" \
+  "grep -q 'AGENT_FINDINGS_ENABLED' \"$INST_HOME/.zshrc\" 2>/dev/null \
+   || grep -q 'AGENT_FINDINGS_ENABLED' \"$INST_HOME/.bashrc\" 2>/dev/null"
+
+$RM -rf "$INST_HOME"
+
+# --- 15. install-codex.sh: standalone, no claude dir required ---------------
+echo "[15] install-codex.sh: standalone (no claude dir or prior install.sh needed)"
+
+CODEX_INST_HOME="$(mktemp -d)"
+CODEX_INST_STORE="$CODEX_INST_HOME/.agent-findings"
+CODEX_INST_DIR="$CODEX_INST_HOME/.codex"
+
+mkdir -p "$CODEX_INST_DIR"
+printf '%s\n' '{"hooks":{}}' > "$CODEX_INST_DIR/hooks.json"
+
+HOME="$CODEX_INST_HOME" \
+AGENT_FINDINGS_HOME="$CODEX_INST_STORE" \
+CODEX_HOME="$CODEX_INST_DIR" \
+  bash "$REPO/install-codex.sh" >/dev/null 2>&1
+
+check "codex install: hooks in agent-findings/hooks"  "[ -f \"$CODEX_INST_STORE/hooks/findings-writer.sh\" ]"
+check "codex install: hooks.json has Stop entry"      \
+  "jq -e '.hooks.Stop | length > 0' \"$CODEX_INST_DIR/hooks.json\" >/dev/null"
+check "codex install: hooks.json has SessionStart"    \
+  "jq -e '.hooks.SessionStart | length > 0' \"$CODEX_INST_DIR/hooks.json\" >/dev/null"
+check "codex install: hooks.json refs agent-findings" \
+  "grep -q 'agent-findings/hooks' \"$CODEX_INST_DIR/hooks.json\""
+check "codex install: no claude dir created"          "[ ! -d \"$CODEX_INST_HOME/.claude\" ]"
+check "codex install: store seeded"                   \
+  "[ -f \"$CODEX_INST_STORE/index.json\" ] && [ -f \"$CODEX_INST_STORE/meta/stats.json\" ]"
+
+$RM -rf "$CODEX_INST_HOME"
+
 # --- cleanup ----------------------------------------------------------------
 $RM -rf "$(dirname "$AGENT_FINDINGS_HOME")" "$STUBDIR"
 

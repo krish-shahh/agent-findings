@@ -1,12 +1,12 @@
 {
-  "//": "agent-findings hook registration. install.sh merges this into your ~/.claude/settings.json automatically. If you prefer to wire it by hand, copy the hook entries below into your existing settings.json (merge, do not overwrite). Putting them in ~/.claude/settings.json makes them load in every Claude Code session, in every project.",
+  "//": "agent-findings hook registration. install.sh merges this into your ~/.claude/settings.json automatically. Hooks live in ~/.agent-findings/hooks/ — a neutral location shared by both Claude Code and Codex. If you prefer to wire it by hand, copy the hook entries below into your existing settings.json (merge, do not overwrite).",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/findings-session-init.sh"
+            "command": "~/.agent-findings/hooks/findings-session-init.sh"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/findings-writer.sh"
+            "command": "~/.agent-findings/hooks/findings-writer.sh"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/findings-reader.sh"
+            "command": "~/.agent-findings/hooks/findings-reader.sh"
           }
         ]
       },
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/findings-exit-guard.sh"
+            "command": "~/.agent-findings/hooks/findings-exit-guard.sh"
           }
         ]
       }
