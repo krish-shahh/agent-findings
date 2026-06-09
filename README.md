@@ -179,7 +179,7 @@ The `findings-writer.sh` Stop hook is also present but is a no-op unless `AGENT_
 
 | Variable | Default | Effect |
 |---|---|---|
-| `AGENT_FINDINGS_ENABLED` | unset | Set to `1` to enable distillation (opt-in, see below) |
+| `AGENT_FINDINGS_ENABLED` | unset | Set to `1` to enable distillation (opt-in, see above) |
 | `AGENT_FINDINGS_HOME` | `~/.agent-findings` | Store location |
 | `AGENT_FINDINGS_TOP_N` | `3` | Findings injected per prompt |
 | `AGENT_FINDINGS_TRANSCRIPT_BYTES` | `60000` | Transcript cap for distiller |
