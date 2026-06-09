@@ -50,7 +50,7 @@ sequenceDiagram
     participant R as findings-reader.sh
     participant S as ~/.agent-findings
     participant C as agent (claude/codex)
-    participant W as findings-writer.sh
+    participant D as /distill skill
 
     P->>R: UserPromptSubmit hook
     R->>S: score index by tags + task_type
@@ -58,13 +58,16 @@ sequenceDiagram
     R-->>C: inject prior knowledge block
     P-->>C: original prompt
     Note over C: executes task
-    C->>W: Stop hook
-    W-->>W: distill session (claude -p, detached)
-    W->>S: write {uuid}.json · reindex
+    Note over C: user types /exit
+    C->>C: exit guard fires (UserPromptSubmit)
+    C->>D: blocked — run /distill first
+    D->>S: write {uuid}.json · reindex
+    Note over C: user types /exit again → exits
 ```
 
 - **`findings-reader.sh`** — before every prompt, scores the store by keyword overlap against `task_type` and `tags`, injects the top 3 as a prior-knowledge block. Pure shell + `jq`, nothing slow.
-- **`findings-writer.sh`** — after every session, detaches a background worker that distills the transcript via `claude -p`, confidence-gates the result (< 0.5 is discarded), and writes one finding per session.
+- **`findings-exit-guard.sh`** — intercepts `/exit` and `/quit` when `AGENT_FINDINGS_ENABLED=1`. Blocks until the session is distilled, then lets the exit through.
+- **`/distill` skill** — Claude extracts a finding from the current session in-session (no extra model call, uses your active subscription), writes it to the store, and unblocks exit.
 
 ---
 
@@ -104,7 +107,9 @@ Full schema: [`schema/finding.schema.json`](schema/finding.schema.json) · Examp
 │       └── {uuid}.json     # source of truth
 └── meta/
     ├── stats.json
-    └── writer.log
+    ├── writer.log
+    ├── current-session     # session_id of the active session (written by SessionStart hook)
+    └── distilled-{sid}     # sentinel: this session was distilled (unblocks /exit)
 ```
 
 ---
@@ -142,17 +147,31 @@ Planned: `agent-findings sync push/pull` against a shared git remote.
 
 ## Distillation (opt-in)
 
-After each task the writer hook can call an LLM to read your session transcript and extract a structured finding. This is the only part of the system that makes a model call — the reader and CLI are pure shell + `jq`.
+Distillation is the step where findings actually get written — Claude reads what happened in the session and extracts a structured lesson. It runs **entirely in-session** via the `/distill` skill, so it uses your active subscription and costs nothing extra.
 
-**Distillation is off by default.** As of June 15, 2026 Anthropic meters `claude -p` (headless CLI calls) from a separate credit pool at standard API rates, separate from your interactive subscription. Leaving it off means zero extra cost.
-
-To enable, set `AGENT_FINDINGS_ENABLED=1` in your shell profile:
+**Distillation is off by default.** Set `AGENT_FINDINGS_ENABLED=1` to enable the exit guard, which prompts you to distill before each `/exit`.
 
 ```bash
 echo 'export AGENT_FINDINGS_ENABLED=1' >> ~/.zshrc  # or ~/.bashrc
 ```
 
-When enabled, the writer calls `claude` (Claude Code CLI) or the Codex CLI — whichever you have installed — using your existing auth. No separate API key needed.
+**The exit flow when enabled:**
+
+```
+user:  /exit
+guard: agent-findings: session not yet distilled.
+       Run /distill to save what you learned, then /exit again.
+
+user:  /distill
+claude: [reads session context, structures finding, writes JSON, rebuilds index]
+claude: "Finding saved (api-integration · 0.82). You can now /exit."
+
+user:  /exit   ← guard sees sentinel, exits cleanly
+```
+
+To skip distillation for a session: set `AGENT_FINDINGS_ENABLED=0` temporarily, or just type `/exit` twice (the guard message tells you how).
+
+The `findings-writer.sh` Stop hook is also present but is a no-op unless `AGENT_FINDINGS_ENABLED=1` — it exists for Codex compatibility where the `/distill` skill isn't available.
 
 ---
 
