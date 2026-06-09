@@ -189,6 +189,8 @@ The `findings-writer.sh` Stop hook is also present but is a no-op unless `AGENT_
 | `AGENT_FINDINGS_ENABLED` | unset | Set to `1` to enable distillation (opt-in, see above) |
 | `AGENT_FINDINGS_HOME` | `~/.agent-findings` | Store location |
 | `AGENT_FINDINGS_TOP_N` | `3` | Findings injected per prompt |
+| `AGENT_FINDINGS_MAX` | `500` | Hard cap on stored findings; oldest+weakest pruned on write |
+| `AGENT_FINDINGS_HALF_LIFE_DAYS` | `90` | Age-decay half-life in days (used for scoring and pruning) |
 | `AGENT_FINDINGS_TRANSCRIPT_BYTES` | `60000` | Transcript cap for distiller |
 | `CODEX_CLI` | `/Applications/Codex.app/…/codex` | Override Codex CLI path |
 

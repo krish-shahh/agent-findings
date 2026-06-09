@@ -18,6 +18,7 @@ set -u
 
 AGENT_FINDINGS_HOME="${AGENT_FINDINGS_HOME:-$HOME/.agent-findings}"
 TOP_N="${AGENT_FINDINGS_TOP_N:-3}"
+AGENT_FINDINGS_HALF_LIFE_DAYS="${AGENT_FINDINGS_HALF_LIFE_DAYS:-90}"
 INDEX="$AGENT_FINDINGS_HOME/index.json"
 
 # Never block a prompt — if anything is missing, exit quietly.
@@ -27,6 +28,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 payload="$(cat)"
 prompt="$(printf '%s' "$payload" | jq -r '.prompt // ""' 2>/dev/null)"
 [ -n "${prompt// /}" ] || exit 0
+cwd="$(printf '%s' "$payload" | jq -r '.cwd // ""' 2>/dev/null)"
 
 # Tokenize: lowercase, split on non-alphanumerics, keep tokens >= 4 chars, dedupe.
 tokens_json="$(printf '%s' "$prompt" \
@@ -38,23 +40,28 @@ tokens_json="$(printf '%s' "$prompt" \
 
 [ "$(printf '%s' "$tokens_json" | jq 'length')" -gt 0 ] || exit 0
 
-# Score findings by token overlap against task_type + tags; sort by score then
-# confidence; keep the top N paths.
-# Match rule: a token matches a field when the token equals the whole field OR
-# equals one of its hyphen-delimited parts (so "python" matches "python-async"
-# but "the" does NOT match "testing"). Unidirectional: token must be a whole
-# part of the field, not just any substring.
-paths="$(jq -r --argjson toks "$tokens_json" --argjson n "$TOP_N" '
+# Score findings by: keyword overlap (gate) × age decay × CWD proximity boost.
+# Match rule: a token matches a field when it equals one of its hyphen-delimited
+# parts ("python" matches "python-async"; "the" does NOT match "testing").
+# Age decay: confidence of a finding halves every AGENT_FINDINGS_HALF_LIFE_DAYS.
+# CWD boost: same-project findings score 1.5×, different-project 0.85×, unknown 1.0×.
+paths="$(jq -r --argjson toks "$tokens_json" --argjson n "$TOP_N" \
+         --arg cwd "$cwd" --argjson hl "$AGENT_FINDINGS_HALF_LIFE_DAYS" '
     .findings
-    | map(. + {
-        _score: ( ([.task_type] + (.tags // [])) as $fields
-                  | [ $toks[] as $t
-                      | $fields[] as $f
-                      | (($f | split("-")) | index($t)) as $hit
-                      | select($hit != null) ]
-                  | length )
-      })
-    | map(select(._score > 0))
+    | map(
+        ( ([.task_type] + (.tags // [])) as $fields
+          | [ $toks[] as $t
+              | $fields[] as $f
+              | (($f | split("-")) | index($t)) as $hit
+              | select($hit != null) ]
+          | length ) as $kw
+        | (try pow(2; -(((now - (.timestamp | fromdateiso8601)) / 86400) / $hl)) catch 1) as $decay
+        | (if ($cwd != "" and (.cwd // "") == $cwd) then 1.5
+           elif (.cwd // "") != "" then 0.85
+           else 1.0 end) as $boost
+        | . + { _score: ($kw * $decay * $boost), _kw: $kw }
+      )
+    | map(select(._kw > 0))
     | sort_by([ -._score, -(.confidence // 0) ])
     | .[0:$n] | .[].path
   ' "$INDEX" 2>/dev/null)"
