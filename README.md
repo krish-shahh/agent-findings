@@ -140,10 +140,27 @@ Planned: `agent-findings sync push/pull` against a shared git remote.
 
 ---
 
+## Distillation (opt-in)
+
+After each task the writer hook can call an LLM to read your session transcript and extract a structured finding. This is the only part of the system that makes a model call — the reader and CLI are pure shell + `jq`.
+
+**Distillation is off by default.** As of June 15, 2026 Anthropic meters `claude -p` (headless CLI calls) from a separate credit pool at standard API rates, separate from your interactive subscription. Leaving it off means zero extra cost.
+
+To enable, set `AGENT_FINDINGS_ENABLED=1` in your shell profile:
+
+```bash
+echo 'export AGENT_FINDINGS_ENABLED=1' >> ~/.zshrc  # or ~/.bashrc
+```
+
+When enabled, the writer calls `claude` (Claude Code CLI) or the Codex CLI — whichever you have installed — using your existing auth. No separate API key needed.
+
+---
+
 ## Configuration
 
 | Variable | Default | Effect |
 |---|---|---|
+| `AGENT_FINDINGS_ENABLED` | unset | Set to `1` to enable distillation (opt-in, see below) |
 | `AGENT_FINDINGS_HOME` | `~/.agent-findings` | Store location |
 | `AGENT_FINDINGS_TOP_N` | `3` | Findings injected per prompt |
 | `AGENT_FINDINGS_TRANSCRIPT_BYTES` | `60000` | Transcript cap for distiller |

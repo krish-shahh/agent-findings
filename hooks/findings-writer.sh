@@ -266,6 +266,12 @@ fi
 
 mkdir -p "$AGENT_FINDINGS_HOME/meta" "$AGENT_FINDINGS_HOME/findings"
 
+# Distillation is opt-in — requires AGENT_FINDINGS_ENABLED=1.
+# Without it the hook is a no-op: no model call, no credit usage.
+if [ "${AGENT_FINDINGS_ENABLED:-}" != "1" ]; then
+  exit 0
+fi
+
 # Read the hook payload from stdin.
 payload="$(cat)"
 transcript=""; session=""; cwd=""
