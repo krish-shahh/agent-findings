@@ -61,6 +61,7 @@ cmd_show() {
   ensure_store
   local id="${1:-}"
   [ -n "$id" ] || die "usage: agent-findings show <id>"
+  [[ "$id" =~ ^[0-9a-f-]+$ ]] || die "invalid id (expected hex characters)"
   local file
   # Resolve via index first (supports id prefix), then fall back to filename glob.
   if [ -f "$INDEX" ]; then
@@ -72,7 +73,11 @@ cmd_show() {
     file="$(find "$AGENT_FINDINGS_HOME/findings" -type f -name "$id*.json" 2>/dev/null | head -1)"
   fi
   [ -n "${file:-}" ] && [ -f "$file" ] || die "no finding matching '$id'"
-  jq . "$file"
+  local real real_home
+  real="$(realpath "$file" 2>/dev/null)" || die "cannot resolve path for '$id'"
+  real_home="$(realpath "$AGENT_FINDINGS_HOME" 2>/dev/null)" || die "cannot resolve store path"
+  [[ "$real" == "$real_home"/* ]] || die "path outside store"
+  jq . "$real"
 }
 
 cmd_search() {
@@ -125,6 +130,7 @@ cmd_delete() {
   ensure_store
   local id="${1:-}"
   [ -n "$id" ] || die "usage: agent-findings delete <id>"
+  [[ "$id" =~ ^[0-9a-f-]+$ ]] || die "invalid id (expected hex characters)"
 
   local file
   if [ -f "$INDEX" ]; then
@@ -136,10 +142,14 @@ cmd_delete() {
     file="$(find "$AGENT_FINDINGS_HOME/findings" -type f -name "$id*.json" 2>/dev/null | head -1)"
   fi
   [ -n "${file:-}" ] && [ -f "$file" ] || die "no finding matching '$id'"
+  local real real_home
+  real="$(realpath "$file" 2>/dev/null)" || die "cannot resolve path for '$id'"
+  real_home="$(realpath "$AGENT_FINDINGS_HOME" 2>/dev/null)" || die "cannot resolve store path"
+  [[ "$real" == "$real_home"/* ]] || die "path outside store"
 
   local full_id
-  full_id="$(jq -r '.id' "$file")"
-  /bin/rm -f "$file"
+  full_id="$(jq -r '.id' "$real")"
+  /bin/rm -f "$real"
 
   # Rebuild index without the deleted finding (fast path via jq filter).
   local tmp
