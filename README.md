@@ -20,12 +20,14 @@ curl -fsSL https://raw.githubusercontent.com/krish-shahh/agent-findings/main/ins
 ```
 The installer will ask whether to enable distillation (recommended — say yes). Restart any running Claude Code sessions and you're done.
 
-**Codex** (after running the Claude Code install above)
+**Codex** (standalone — does not require the Claude Code install)
 ```bash
 git clone https://github.com/krish-shahh/agent-findings.git
 cd agent-findings && ./install-codex.sh
 ```
-Restart Codex and approve the two new hooks when prompted. Both agents now share the same `~/.agent-findings` store.
+Restart Codex and approve the three new hooks when prompted. Both agents share the same `~/.agent-findings` store.
+
+Both installers are independent. Run either one, or both — they write hooks to the same neutral location (`~/.agent-findings/hooks/`) so there's no conflict.
 
 <details>
 <summary>Manual / clone install</summary>
@@ -33,8 +35,8 @@ Restart Codex and approve the two new hooks when prompted. Both agents now share
 ```bash
 git clone https://github.com/krish-shahh/agent-findings.git
 cd agent-findings
-./install.sh          # Claude Code
-./install-codex.sh    # Codex (optional)
+./install.sh          # Claude Code (standalone)
+./install-codex.sh    # Codex (standalone)
 ```
 
 To uninstall (findings are kept): `./uninstall.sh`
@@ -102,6 +104,11 @@ Full schema: [`schema/finding.schema.json`](schema/finding.schema.json) · Examp
 ```
 ~/.agent-findings/
 ├── index.json              # tag index + finding summaries (cache)
+├── hooks/                  # agent-neutral hook scripts (shared by Claude Code + Codex)
+│   ├── findings-writer.sh
+│   ├── findings-reader.sh
+│   ├── findings-session-init.sh
+│   └── findings-exit-guard.sh
 ├── findings/
 │   └── {task_type}/
 │       └── {uuid}.json     # source of truth
