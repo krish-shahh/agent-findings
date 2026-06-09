@@ -14,6 +14,8 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 WRITER="$REPO/hooks/findings-writer.sh"
 READER="$REPO/hooks/findings-reader.sh"
+INIT="$REPO/hooks/findings-session-init.sh"
+GUARD="$REPO/hooks/findings-exit-guard.sh"
 CLI="$REPO/bin/agent-findings"
 RM=/bin/rm   # bypass any `rm` alias (e.g. a trash tool that rejects -f)
 
@@ -29,8 +31,8 @@ printf '%s\n' '{"task_types":{},"tags":{},"findings":[]}' > "$AGENT_FINDINGS_HOM
 printf '%s\n' '{"total_findings":0,"top_task_types":[],"top_tags":[],"last_write":null,"last_sync":null}' \
   > "$AGENT_FINDINGS_HOME/meta/stats.json"
 
-# Unset API keys so tests always hit the stubbed claude CLI, never a live API.
-unset ANTHROPIC_API_KEY OPENAI_API_KEY
+# Unset API keys and distillation flag so tests run in a clean, controlled env.
+unset ANTHROPIC_API_KEY OPENAI_API_KEY AGENT_FINDINGS_ENABLED
 
 # stub `claude`: prints whatever $STUB_OUT holds (so each test controls the finding)
 STUBDIR="$(mktemp -d)"
@@ -146,6 +148,58 @@ check "file removed from disk"         "[ ! -f \"$DEL_FILE\" ]"
 check "index count decremented"        "[ \"\$(n_findings)\" -eq 1 ]"
 check "stats total decremented"        "[ \"\$(jq -r .total_findings \"$AGENT_FINDINGS_HOME/meta/stats.json\")\" -eq 1 ]"
 check "delete prefix match works"      "\"$CLI\" delete \"${DEL_ID:0:8}\" 2>&1 | grep -q 'no finding'" # already gone
+
+# --- 12. session init hook --------------------------------------------------
+echo "[12] session init: writes session_id to current-session"
+printf '%s\n' '{"session_id":"sess-init-test","transcript_path":"/tmp/tx.jsonl","cwd":"/tmp"}' \
+  | "$INIT"
+check "current-session file created"   "[ -f \"$AGENT_FINDINGS_HOME/meta/current-session\" ]"
+check "session_id written correctly"   "[ \"\$(cat \"$AGENT_FINDINGS_HOME/meta/current-session\")\" = sess-init-test ]"
+
+# Overwrite with a new session — idempotent, last write wins.
+printf '%s\n' '{"session_id":"sess-init-v2","transcript_path":"/tmp/tx.jsonl","cwd":"/tmp"}' \
+  | "$INIT"
+check "session_id updated on re-init"  "[ \"\$(cat \"$AGENT_FINDINGS_HOME/meta/current-session\")\" = sess-init-v2 ]"
+
+# Empty session_id is a no-op.
+printf '%s\n' '{"session_id":"","transcript_path":"/tmp/tx.jsonl","cwd":"/tmp"}' \
+  | "$INIT"
+check "empty session_id leaves file unchanged" \
+  "[ \"\$(cat \"$AGENT_FINDINGS_HOME/meta/current-session\")\" = sess-init-v2 ]"
+
+# --- 13. exit guard ---------------------------------------------------------
+echo "[13] exit guard"
+
+# Off by default (AGENT_FINDINGS_ENABLED unset) — always allows /exit.
+check "guard is a no-op when AGENT_FINDINGS_ENABLED unset" \
+  "printf '%s' '{\"prompt\":\"/exit\",\"session_id\":\"sess-no-sentinel\"}' \
+    | AGENT_FINDINGS_ENABLED= \"$GUARD\""
+
+# AGENT_FINDINGS_ENABLED=1, no sentinel → blocks (exit code 2).
+check "guard blocks /exit when enabled and not distilled" \
+  "! printf '%s' '{\"prompt\":\"/exit\",\"session_id\":\"sess-no-sentinel\"}' \
+    | AGENT_FINDINGS_ENABLED=1 \"$GUARD\" 2>/dev/null"
+
+# /quit is treated identically to /exit.
+check "guard blocks /quit identically" \
+  "! printf '%s' '{\"prompt\":\"/quit\",\"session_id\":\"sess-no-sentinel\"}' \
+    | AGENT_FINDINGS_ENABLED=1 \"$GUARD\" 2>/dev/null"
+
+# Non-exit prompts always pass through.
+check "guard passes through non-exit prompts" \
+  "printf '%s' '{\"prompt\":\"fix this bug\",\"session_id\":\"sess-no-sentinel\"}' \
+    | AGENT_FINDINGS_ENABLED=1 \"$GUARD\""
+
+# Sentinel present → allows /exit through.
+touch "$AGENT_FINDINGS_HOME/meta/distilled-sess-init-test"
+check "guard allows /exit after sentinel created" \
+  "printf '%s' '{\"prompt\":\"/exit\",\"session_id\":\"sess-init-test\"}' \
+    | AGENT_FINDINGS_ENABLED=1 \"$GUARD\""
+
+# AGENT_FINDINGS_ENABLED=0 (explicitly disabled) — always allows.
+check "guard is a no-op when AGENT_FINDINGS_ENABLED=0" \
+  "printf '%s' '{\"prompt\":\"/exit\",\"session_id\":\"sess-no-sentinel\"}' \
+    | AGENT_FINDINGS_ENABLED=0 \"$GUARD\""
 
 # --- cleanup ----------------------------------------------------------------
 $RM -rf "$(dirname "$AGENT_FINDINGS_HOME")" "$STUBDIR"

@@ -36,8 +36,16 @@ mkdir -p "$AGENT_FINDINGS_HOME/findings" "$AGENT_FINDINGS_HOME/meta"
 # 2. Hooks --------------------------------------------------------------------
 say "hooks        -> $HOOKS_DIR"
 mkdir -p "$HOOKS_DIR"
-install -m 0755 "$REPO_DIR/hooks/findings-writer.sh" "$HOOKS_DIR/findings-writer.sh"
-install -m 0755 "$REPO_DIR/hooks/findings-reader.sh" "$HOOKS_DIR/findings-reader.sh"
+install -m 0755 "$REPO_DIR/hooks/findings-writer.sh"       "$HOOKS_DIR/findings-writer.sh"
+install -m 0755 "$REPO_DIR/hooks/findings-reader.sh"       "$HOOKS_DIR/findings-reader.sh"
+install -m 0755 "$REPO_DIR/hooks/findings-session-init.sh" "$HOOKS_DIR/findings-session-init.sh"
+install -m 0755 "$REPO_DIR/hooks/findings-exit-guard.sh"   "$HOOKS_DIR/findings-exit-guard.sh"
+
+# 2b. Skill -------------------------------------------------------------------
+SKILLS_DIR="$CLAUDE_DIR/skills"
+say "skill        -> $SKILLS_DIR/distill.md"
+mkdir -p "$SKILLS_DIR"
+install -m 0644 "$REPO_DIR/.claude/skills/distill.md" "$SKILLS_DIR/distill.md"
 
 # 3. CLI ----------------------------------------------------------------------
 say "cli          -> $BIN_DIR/agent-findings"
@@ -59,26 +67,43 @@ say "backup       -> $backup"
 
 WRITER_CMD="~/.claude/hooks/findings-writer.sh"
 READER_CMD="~/.claude/hooks/findings-reader.sh"
+INIT_CMD="~/.claude/hooks/findings-session-init.sh"
+GUARD_CMD="~/.claude/hooks/findings-exit-guard.sh"
 
 tmp="$SETTINGS.tmp.$$"
 jq \
   --arg writer "$WRITER_CMD" \
-  --arg reader "$READER_CMD" '
-  # Ensure .hooks and the two event arrays exist.
+  --arg reader "$READER_CMD" \
+  --arg init   "$INIT_CMD" \
+  --arg guard  "$GUARD_CMD" '
+  # Ensure .hooks and all event arrays exist.
   .hooks = (.hooks // {})
-  | .hooks.Stop = (.hooks.Stop // [])
+  | .hooks.Stop             = (.hooks.Stop             // [])
   | .hooks.UserPromptSubmit = (.hooks.UserPromptSubmit // [])
+  | .hooks.SessionStart     = (.hooks.SessionStart     // [])
 
-  # Add the writer to Stop unless its command is already registered anywhere.
+  # Stop: writer
   | ( [ .hooks.Stop[]?.hooks[]?.command ] | index($writer) ) as $hasWriter
   | (if $hasWriter == null
        then .hooks.Stop += [ { "hooks": [ { "type": "command", "command": $writer } ] } ]
        else . end)
 
-  # Add the reader to UserPromptSubmit unless already registered.
+  # UserPromptSubmit: reader
   | ( [ .hooks.UserPromptSubmit[]?.hooks[]?.command ] | index($reader) ) as $hasReader
   | (if $hasReader == null
        then .hooks.UserPromptSubmit += [ { "hooks": [ { "type": "command", "command": $reader } ] } ]
+       else . end)
+
+  # UserPromptSubmit: exit guard
+  | ( [ .hooks.UserPromptSubmit[]?.hooks[]?.command ] | index($guard) ) as $hasGuard
+  | (if $hasGuard == null
+       then .hooks.UserPromptSubmit += [ { "hooks": [ { "type": "command", "command": $guard } ] } ]
+       else . end)
+
+  # SessionStart: session init
+  | ( [ .hooks.SessionStart[]?.hooks[]?.command ] | index($init) ) as $hasInit
+  | (if $hasInit == null
+       then .hooks.SessionStart += [ { "hooks": [ { "type": "command", "command": $init } ] } ]
        else . end)
 ' "$SETTINGS" >"$tmp" && mv "$tmp" "$SETTINGS"
 
