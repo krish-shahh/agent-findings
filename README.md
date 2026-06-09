@@ -12,7 +12,7 @@ agent-findings fixes that: after every task an agent writes down what it learned
 
 ## Install
 
-Requires `jq`. On macOS: `brew install jq`. Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in your environment for distillation (the `claude` CLI works too as a fallback).
+Requires `jq`. On macOS: `brew install jq`. Distillation uses the agent CLI you already have installed — Claude Code (`claude`) or Codex. No separate API key needed.
 
 **Claude Code**
 ```bash
@@ -144,11 +144,10 @@ Planned: `agent-findings sync push/pull` against a shared git remote.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Use Anthropic API for distillation (claude-haiku; preferred) |
-| `OPENAI_API_KEY` | — | Use OpenAI API for distillation (gpt-4o-mini; fallback) |
 | `AGENT_FINDINGS_HOME` | `~/.agent-findings` | Store location |
 | `AGENT_FINDINGS_TOP_N` | `3` | Findings injected per prompt |
 | `AGENT_FINDINGS_TRANSCRIPT_BYTES` | `60000` | Transcript cap for distiller |
+| `CODEX_CLI` | `/Applications/Codex.app/…/codex` | Override Codex CLI path |
 
 ---
 

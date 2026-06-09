@@ -30,42 +30,24 @@ log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG" 2>/dev/n
 # Runs with AGENT_FINDINGS_DISTILL=1 set so the nested `claude` call's own Stop
 # hook short-circuits (see guard at the bottom) and we don't recurse forever.
 # ---------------------------------------------------------------------------
-# Call a model for distillation.
-# Priority: ANTHROPIC_API_KEY → OPENAI_API_KEY → claude CLI (fallback).
+# Call a model for distillation using the installed agent CLI (no separate API key needed).
+# Priority: claude CLI (Claude Code) → codex CLI (Codex) → skip.
 call_model() {
-  local prompt="$1" body response
-
-  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-    body="$(jq -cn --arg p "$prompt" \
-      '{"model":"claude-haiku-4-5-20251001","max_tokens":1024,"messages":[{"role":"user","content":$p}]}')"
-    response="$(printf '%s' "$body" \
-      | curl -sf https://api.anthropic.com/v1/messages \
-          -H "x-api-key: $ANTHROPIC_API_KEY" \
-          -H "anthropic-version: 2023-06-01" \
-          -H "content-type: application/json" \
-          --data-binary @- 2>>"$LOG")"
-    printf '%s' "$response" | jq -r '.content[0].text // empty' 2>/dev/null
-    return
-  fi
-
-  if [ -n "${OPENAI_API_KEY:-}" ]; then
-    body="$(jq -cn --arg p "$prompt" \
-      '{"model":"gpt-4o-mini","max_tokens":1024,"messages":[{"role":"user","content":$p}]}')"
-    response="$(printf '%s' "$body" \
-      | curl -sf https://api.openai.com/v1/chat/completions \
-          -H "Authorization: Bearer $OPENAI_API_KEY" \
-          -H "Content-Type: application/json" \
-          --data-binary @- 2>>"$LOG")"
-    printf '%s' "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null
-    return
-  fi
+  local prompt="$1"
 
   if command -v claude >/dev/null 2>&1; then
     printf '%s\n' "$prompt" | claude -p 2>>"$LOG"
     return
   fi
 
-  log "skip: set ANTHROPIC_API_KEY or OPENAI_API_KEY (or install claude CLI)"
+  # Codex CLI — not in PATH by default on macOS, check the known app bundle location.
+  local codex_cli="${CODEX_CLI:-/Applications/Codex.app/Contents/Resources/codex}"
+  if [ -x "$codex_cli" ]; then
+    printf '%s\n' "$prompt" | "$codex_cli" exec - 2>>"$LOG"
+    return
+  fi
+
+  log "skip: no agent CLI found (install Claude Code or Codex)"
   return 1
 }
 
