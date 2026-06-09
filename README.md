@@ -1,10 +1,10 @@
 # agent-findings
 
-**A cross-session collective-learning layer for Claude Code agents.**
+**A cross-session collective-learning layer for Claude Code and Codex agents.**
 
 Every agent starts with amnesia. It solves something, the session ends, and the lesson evaporates. The next agent relearns it from scratch.
 
-agent-findings fixes that: after every task an agent writes down what it learned, before every task it reads back what past runs figured out.
+agent-findings fixes that: after every task an agent writes down what it learned, before every task it reads back what past runs figured out. Both Claude Code and Codex write to and read from the same store.
 
 > **Blog post:** [i gave my coding agents a shared memory](https://krish-shah.vercel.app/blog/2026-06-08-i-gave-my-agents-a-shared-memory)
 
@@ -14,11 +14,18 @@ agent-findings fixes that: after every task an agent writes down what it learned
 
 Requires `jq` and the `claude` CLI. On macOS: `brew install jq`.
 
+**Claude Code**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/krish-shahh/agent-findings/main/install.sh | bash
 ```
-
 Restart any running Claude Code sessions. That's it — both hooks register automatically.
+
+**Codex** (after running the Claude Code install above)
+```bash
+git clone https://github.com/krish-shahh/agent-findings.git
+cd agent-findings && ./install-codex.sh
+```
+Restart Codex and approve the two new hooks when prompted. Both agents now share the same `~/.agent-findings` store.
 
 <details>
 <summary>Manual / clone install</summary>
@@ -26,7 +33,8 @@ Restart any running Claude Code sessions. That's it — both hooks register auto
 ```bash
 git clone https://github.com/krish-shahh/agent-findings.git
 cd agent-findings
-./install.sh
+./install.sh          # Claude Code
+./install-codex.sh    # Codex (optional)
 ```
 
 To uninstall (findings are kept): `./uninstall.sh`
@@ -144,7 +152,7 @@ Planned: `agent-findings sync push/pull` against a shared git remote.
 
 ## Contributing
 
-A finding is just a JSON file. Write the same shape from Cursor, Aider, a CI job, or your own agent and it drops straight into any store. See [CONTRIBUTING.md](CONTRIBUTING.md).
+A finding is just a JSON file. Write the same shape from Cursor, Aider, Codex, a CI job, or your own agent and it drops straight into any store. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

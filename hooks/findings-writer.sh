@@ -35,17 +35,29 @@ do_distill() {
 
   command -v jq >/dev/null 2>&1     || { log "skip: jq not found"; return 0; }
   command -v claude >/dev/null 2>&1 || { log "skip: claude CLI not found"; return 0; }
-  [ -f "$transcript" ]              || { log "skip: no transcript at $transcript"; return 0; }
 
-  # Pull just the human-readable text out of the JSONL transcript and cap size.
+  # Codex doesn't send transcript_path — locate session file by session_id instead.
+  if [ -z "$transcript" ] && [ -n "$session" ]; then
+    transcript="$(find "${CODEX_HOME:-$HOME/.codex}/sessions" -name "*${session}*" -type f 2>/dev/null | head -1)"
+  fi
+  [ -f "$transcript" ] || { log "skip: no transcript at $transcript"; return 0; }
+
+  # Pull conversation text from the JSONL transcript. Handles both Claude Code
+  # format (.message / .type=="user"|"assistant") and Codex format
+  # (.type=="response_item" / .payload.role / input_text|output_text).
   local convo
   convo="$(jq -r '
-        select(.message != null)
-        | select(.type=="user" or .type=="assistant")
-        | (.message.content) as $c
-        | if   ($c|type)=="string" then $c
-          elif ($c|type)=="array"  then ($c | map(select(.type=="text") | .text) | join("\n"))
-          else empty end
+        ( select(.message != null)
+          | select(.type=="user" or .type=="assistant")
+          | (.message.content) as $c
+          | if   ($c|type)=="string" then $c
+            elif ($c|type)=="array"  then ($c | map(select(.type=="text") | .text) | join("\n"))
+            else empty end ),
+        ( select(.type=="response_item")
+          | select(.payload.role=="user" or .payload.role=="assistant")
+          | .payload.content[]?
+          | select(.type=="input_text" or .type=="output_text")
+          | .text )
       ' "$transcript" 2>/dev/null | tail -c "$TRANSCRIPT_BUDGET_BYTES")"
 
   if [ -z "${convo// /}" ]; then
