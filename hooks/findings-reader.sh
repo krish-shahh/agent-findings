@@ -72,13 +72,17 @@ block="$(
     real_home="$(realpath "$AGENT_FINDINGS_HOME" 2>/dev/null)" || continue
     [[ "$real" == "$real_home"/* ]] || continue
     i=$((i + 1))
+    # Sanitize text fields before rendering: collapse newlines (prevents heading
+    # injection via embedded \n# ...) and cap at 500 chars (limits blast radius
+    # if a crafted finding makes it into the store).
     jq -r --arg i "$i" '
+      def sanitize: (. // "") | gsub("\n"; " ") | gsub("\r"; "") | .[0:500];
       "\n### Finding \($i): \(.task_type)" +
       (if (.language // "none") != "none" then "  ·  \(.language)" else "" end) +
       "  ·  confidence \(.confidence)\n" +
-      "- What worked: \(.what_worked)\n" +
-      (if (.what_failed // "") != "" then "- What failed: \(.what_failed)\n" else "" end) +
-      (if (.better_exit_condition // "") != "" then "- Better exit condition: \(.better_exit_condition)\n" else "" end) +
+      "- What worked: \(.what_worked | sanitize)\n" +
+      (if (.what_failed // "") != "" then "- What failed: \(.what_failed | sanitize)\n" else "" end) +
+      (if (.better_exit_condition // "") != "" then "- Better exit condition: \(.better_exit_condition | sanitize)\n" else "" end) +
       (if ((.tags // []) | length) > 0 then "- Tags: \(.tags | join(", "))\n" else "" end)
     ' "$p" 2>/dev/null
   done <<< "$paths"

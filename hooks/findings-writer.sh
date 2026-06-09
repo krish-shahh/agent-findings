@@ -113,13 +113,21 @@ PROMPT
     return 0
   fi
 
-  # Isolate the JSON object: drop code fences, then take first '{' .. last '}'.
+  # Isolate the JSON object: strip code fences, then use jq to extract the
+  # first complete object (handles trailing prose and nested braces correctly).
   local core
-  core="$(printf '%s' "$raw" | sed '/^```/d')"
-  core="{${core#*\{}"
-  core="${core%\}*}}"
+  core="$(printf '%s' "$raw" \
+    | grep -v '^```' \
+    | jq -Rrs '
+        . as $s
+        | ($s | index("{")) as $start
+        | ($s | rindex("}")) as $end
+        | if ($start != null) and ($end != null) and ($end > $start)
+          then $s[$start:$end+1]
+          else "" end
+      ' 2>/dev/null)"
 
-  if ! printf '%s' "$core" | jq -e . >/dev/null 2>&1; then
+  if [ -z "$core" ] || ! printf '%s' "$core" | jq -e . >/dev/null 2>&1; then
     log "skip: model output was not valid JSON"
     return 0
   fi

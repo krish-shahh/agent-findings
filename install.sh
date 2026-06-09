@@ -60,6 +60,11 @@ say "backup       -> $backup"
 WRITER_CMD="~/.claude/hooks/findings-writer.sh"
 READER_CMD="~/.claude/hooks/findings-reader.sh"
 
+if ! jq -e 'type == "object"' "$SETTINGS" >/dev/null 2>&1; then
+  say "warning: $SETTINGS is not valid JSON object — resetting to empty config"
+  printf '%s\n' '{}' >"$SETTINGS"
+fi
+
 tmp="$SETTINGS.tmp.$$"
 jq \
   --arg writer "$WRITER_CMD" \
