@@ -31,7 +31,7 @@ log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG" 2>/dev/n
 # hook short-circuits (see guard at the bottom) and we don't recurse forever.
 # ---------------------------------------------------------------------------
 do_distill() {
-  local transcript="$1" session="$2" cwd="$3"
+  local transcript="$1" session="$2" cwd="$3" agent="${4:-claude-code}"
 
   command -v jq >/dev/null 2>&1     || { log "skip: jq not found"; return 0; }
   command -v claude >/dev/null 2>&1 || { log "skip: claude CLI not found"; return 0; }
@@ -140,7 +140,7 @@ PROMPT
 
   finding="$(printf '%s' "$core" | jq -c \
       --arg sv "$SCHEMA_VERSION" --arg id "$uuid" --arg ts "$ts" \
-      --arg sid "$session" --arg cwd "$cwd" '
+      --arg sid "$session" --arg cwd "$cwd" --arg agent "$agent" '
       ((.task_type // "general") | ascii_downcase | gsub("[^a-z0-9]+";"-") | gsub("^-+|-+$";"")) as $tt
       | ((.language // "none") | ascii_downcase | gsub("[^a-z0-9]+";"-") | gsub("^-+|-+$";"")) as $lang
       | {
@@ -154,7 +154,7 @@ PROMPT
           tags: ((.tags // []) | map(ascii_downcase | gsub("[^a-z0-9]+";"-") | gsub("^-+|-+$";"")) | map(select(. != "")) | unique),
           confidence: (.confidence // 0),
           timestamp: $ts,
-          source: { agent: "claude-code", session_id: $sid, cwd: $cwd }
+          source: { agent: $agent, session_id: $sid, cwd: $cwd }
         }')" || { log "skip: normalization failed"; return 0; }
 
   task_type="$(printf '%s' "$finding" | jq -r '.task_type')"
@@ -235,7 +235,7 @@ rebuild_stats() {
 
 # Background worker path: do the actual distillation and return.
 if [ "${1:-}" = "--distill" ]; then
-  do_distill "${2:-}" "${3:-}" "${4:-}"
+  do_distill "${2:-}" "${3:-}" "${4:-}" "${5:-}"
   exit 0
 fi
 
@@ -260,9 +260,13 @@ if command -v jq >/dev/null 2>&1; then
   if [[ "$transcript" != /* ]] || [[ "$transcript" == *".."* ]]; then transcript=""; fi
 fi
 
+# Detect which agent fired the hook: Claude Code sends transcript_path; Codex does not.
+agent_name="codex"
+[ -n "$transcript" ] && agent_name="claude-code"
+
 # Detach the slow work so the session returns immediately. nohup keeps it alive
 # after this hook process exits.
-AGENT_FINDINGS_DISTILL=1 nohup "$0" --distill "$transcript" "$session" "$cwd" \
+AGENT_FINDINGS_DISTILL=1 nohup "$0" --distill "$transcript" "$session" "$cwd" "$agent_name" \
   >>"$LOG" 2>&1 < /dev/null &
 
 exit 0

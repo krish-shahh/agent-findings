@@ -49,7 +49,7 @@ sequenceDiagram
     participant P as user prompt
     participant R as findings-reader.sh
     participant S as ~/.agent-findings
-    participant C as claude
+    participant C as agent (claude/codex)
     participant W as findings-writer.sh
 
     P->>R: UserPromptSubmit hook
