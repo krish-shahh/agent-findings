@@ -1,0 +1,5 @@
+# agent-findings is installed to ~/.agent-findings and ~/.claude — nothing
+# runtime-generated lives in this repo. Keep the tree clean.
+*.bak.*
+*.tmp.*
+.DS_Store

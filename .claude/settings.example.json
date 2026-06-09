@@ -1,0 +1,25 @@
+{
+  "//": "agent-findings hook registration. install.sh merges this into your ~/.claude/settings.json automatically. If you prefer to wire it by hand, copy the `hooks.Stop` and `hooks.UserPromptSubmit` entries below into your existing settings.json (merge, do not overwrite). Putting them in ~/.claude/settings.json makes them load in every Claude Code session, in every project.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/findings-writer.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/findings-reader.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

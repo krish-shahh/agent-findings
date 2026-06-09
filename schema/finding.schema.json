@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/agent-findings/agent-findings/schema/finding.schema.json",
+  "title": "Agent Finding",
+  "description": "A single distilled lesson learned by an autonomous coding agent after completing a task. This is the core artifact of the agent-findings protocol: one finding per file, plain JSON, append-only. Any agent implementation that produces or consumes findings should conform to this schema so that knowledge is portable across tools and projects.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "task_type",
+    "what_worked",
+    "what_failed",
+    "better_exit_condition",
+    "tags",
+    "confidence",
+    "timestamp"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this protocol the finding conforms to. Consumers should tolerate unknown minor versions.",
+      "examples": ["1.0"]
+    },
+    "id": {
+      "type": "string",
+      "description": "Globally unique id for the finding. Lowercase UUID v4 recommended. Doubles as the on-disk filename ({id}.json).",
+      "examples": ["7c2a1e90-4b3d-4f1a-9c2e-0a1b2c3d4e5f"]
+    },
+    "task_type": {
+      "type": "string",
+      "description": "Short kebab-case category for the task this finding came from. Used as the directory shard and the primary retrieval key. Keep the vocabulary small and reusable.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "examples": ["debugging", "refactor", "test-writing", "api-integration", "build-config", "data-migration"]
+    },
+    "language": {
+      "type": "string",
+      "description": "Primary programming language or ecosystem of the task. Use 'none' for non-code tasks and 'multiple' when no single language dominates.",
+      "examples": ["python", "typescript", "rust", "bash", "none", "multiple"]
+    },
+    "what_worked": {
+      "type": "string",
+      "description": "The approach, technique, or insight that actually solved the problem. Written so a future agent could act on it directly. Concrete over abstract."
+    },
+    "what_failed": {
+      "type": "string",
+      "description": "Dead ends, wrong assumptions, or approaches that wasted time. Empty string if nothing notably failed. This is often the most valuable field — it lets other agents skip the mistake."
+    },
+    "better_exit_condition": {
+      "type": "string",
+      "description": "The signal that should have told the agent it was actually done (or actually stuck) sooner. A better stopping criterion than the one used. Empty string if the exit condition used was already correct."
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form kebab-case keywords for cross-task retrieval. 3-8 tags. These index orthogonally to task_type (e.g. 'race-condition', 'pytest', 'monorepo').",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+      },
+      "minItems": 0,
+      "maxItems": 16
+    },
+    "confidence": {
+      "type": "number",
+      "description": "How reliable and generalizable this finding is, from 0 to 1. Findings below 0.5 are not written to the store — they are too speculative or too session-specific to help anyone else.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "UTC creation time in ISO 8601 (RFC 3339) format.",
+      "format": "date-time",
+      "examples": ["2026-06-08T22:00:00Z"]
+    },
+    "source": {
+      "type": "object",
+      "description": "Provenance of the finding. Optional but recommended. Implementations may add fields here without breaking the protocol.",
+      "additionalProperties": true,
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "Identifier of the agent/tool that produced the finding.",
+          "examples": ["claude-code"]
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Opaque id of the session the finding was distilled from."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory of the originating task. Useful for local debugging; strip before publishing if it leaks paths."
+        }
+      }
+    }
+  }
+}

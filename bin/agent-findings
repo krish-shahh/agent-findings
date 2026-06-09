@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+#
+# agent-findings — CLI for the agent-findings collective learning store.
+#
+#   agent-findings list [N]        recent findings (default 10)
+#   agent-findings show <id>       full finding by id (or id prefix)
+#   agent-findings search <query>  find findings matching a query string
+#   agent-findings delete <id>     remove a finding by id (or id prefix)
+#   agent-findings stats           store statistics
+#   agent-findings reindex         rebuild index.json + stats.json from files
+#   agent-findings sync            push/pull with a shared remote (stub)
+#   agent-findings help            this help
+#
+# Store layout and the finding schema are documented in the project README and
+# schema/finding.schema.json. The store is plain JSON under ~/.agent-findings.
+
+set -u
+
+AGENT_FINDINGS_HOME="${AGENT_FINDINGS_HOME:-$HOME/.agent-findings}"
+INDEX="$AGENT_FINDINGS_HOME/index.json"
+STATS="$AGENT_FINDINGS_HOME/meta/stats.json"
+
+die() { printf 'agent-findings: %s\n' "$*" >&2; exit 1; }
+
+command -v jq >/dev/null 2>&1 || die "jq is required (https://jqlang.github.io/jq/)"
+
+usage() {
+  sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+ensure_store() {
+  [ -d "$AGENT_FINDINGS_HOME" ] || die "no store at $AGENT_FINDINGS_HOME (run install.sh)"
+}
+
+cmd_list() {
+  ensure_store
+  [ -f "$INDEX" ] || { echo "No findings yet."; return 0; }
+  local n="${1:-10}"
+  local count
+  count="$(jq '.findings | length' "$INDEX")"
+  if [ "$count" -eq 0 ]; then echo "No findings yet."; return 0; fi
+
+  printf '%-8s  %-18s  %-12s  %-5s  %s\n' "ID" "TASK_TYPE" "LANGUAGE" "CONF" "TIMESTAMP"
+  printf '%-8s  %-18s  %-12s  %-5s  %s\n' "--------" "------------------" "------------" "-----" "-------------------"
+  jq -r --argjson n "$n" '
+      .findings
+      | sort_by(.timestamp) | reverse | .[0:$n]
+      | .[]
+      | [ (.id[0:8]), .task_type, (.language // "none"),
+          (.confidence | tostring), .timestamp ] | @tsv
+    ' "$INDEX" \
+  | while IFS=$'\t' read -r id tt lang conf ts; do
+      printf '%-8s  %-18s  %-12s  %-5s  %s\n' "$id" "$tt" "$lang" "$conf" "$ts"
+    done
+
+  echo
+  echo "$count finding(s) total. Use 'agent-findings show <id>' for detail."
+}
+
+cmd_show() {
+  ensure_store
+  local id="${1:-}"
+  [ -n "$id" ] || die "usage: agent-findings show <id>"
+  local file
+  # Resolve via index first (supports id prefix), then fall back to filename glob.
+  if [ -f "$INDEX" ]; then
+    file="$(jq -r --arg id "$id" '
+        .findings | map(select(.id | startswith($id))) | .[0].path // empty
+      ' "$INDEX")"
+  fi
+  if [ -z "${file:-}" ] || [ ! -f "$file" ]; then
+    file="$(find "$AGENT_FINDINGS_HOME/findings" -type f -name "$id*.json" 2>/dev/null | head -1)"
+  fi
+  [ -n "${file:-}" ] && [ -f "$file" ] || die "no finding matching '$id'"
+  jq . "$file"
+}
+
+cmd_search() {
+  ensure_store
+  local query="${1:-}"
+  [ -n "$query" ] || die "usage: agent-findings search <query>"
+  [ -f "$INDEX" ] || { echo "No findings yet."; return 0; }
+
+  # Tokenize query the same way the reader does: lowercase, split, min 4 chars.
+  local tokens_json
+  tokens_json="$(printf '%s' "$query" \
+    | tr 'A-Z' 'a-z' \
+    | tr -c 'a-z0-9' '\n' \
+    | awk 'length($0) >= 4' \
+    | sort -u \
+    | jq -R . | jq -s 'unique')"
+
+  if [ "$(printf '%s' "$tokens_json" | jq 'length')" -eq 0 ]; then
+    echo "No tokens (all words under 4 chars). Try a longer query."; return 0
+  fi
+
+  local results
+  results="$(jq -r --argjson toks "$tokens_json" '
+      .findings
+      | map(. + {
+          _score: ( ([.task_type] + (.tags // [])) as $fields
+                    | [ $toks[] as $t
+                        | $fields[] as $f
+                        | (($f | split("-")) | index($t)) as $hit
+                        | select($hit != null) ]
+                    | length )
+        })
+      | map(select(._score > 0))
+      | sort_by([ -._score, -(.confidence // 0) ])
+      | .[]
+      | [ (.id[0:8]), .task_type, (.language // "none"),
+          (.confidence | tostring), .timestamp ] | @tsv
+    ' "$INDEX" 2>/dev/null)"
+
+  if [ -z "$results" ]; then echo "No findings match '$query'."; return 0; fi
+
+  printf '%-8s  %-18s  %-12s  %-5s  %s\n' "ID" "TASK_TYPE" "LANGUAGE" "CONF" "TIMESTAMP"
+  printf '%-8s  %-18s  %-12s  %-5s  %s\n' "--------" "------------------" "------------" "-----" "-------------------"
+  while IFS=$'\t' read -r id tt lang conf ts; do
+    printf '%-8s  %-18s  %-12s  %-5s  %s\n' "$id" "$tt" "$lang" "$conf" "$ts"
+  done <<< "$results"
+}
+
+cmd_delete() {
+  ensure_store
+  local id="${1:-}"
+  [ -n "$id" ] || die "usage: agent-findings delete <id>"
+
+  local file
+  if [ -f "$INDEX" ]; then
+    file="$(jq -r --arg id "$id" '
+        .findings | map(select(.id | startswith($id))) | .[0].path // empty
+      ' "$INDEX")"
+  fi
+  if [ -z "${file:-}" ] || [ ! -f "$file" ]; then
+    file="$(find "$AGENT_FINDINGS_HOME/findings" -type f -name "$id*.json" 2>/dev/null | head -1)"
+  fi
+  [ -n "${file:-}" ] && [ -f "$file" ] || die "no finding matching '$id'"
+
+  local full_id
+  full_id="$(jq -r '.id' "$file")"
+  /bin/rm -f "$file"
+
+  # Rebuild index without the deleted finding (fast path via jq filter).
+  local tmp
+  tmp="$INDEX.tmp.$$"
+  jq --arg id "$full_id" '
+      .findings |= map(select(.id != $id))
+      | .task_types = ( .findings | map(.task_type) | group_by(.) | map({key:.[0],value:length}) | from_entries )
+      | .tags = ( [ .findings[].tags[]? ] | group_by(.) | map({key:.[0],value:length}) | from_entries )
+    ' "$INDEX" >"$tmp" 2>/dev/null && mv "$tmp" "$INDEX" || /bin/rm -f "$tmp"
+
+  # Update stats total.
+  local stmp
+  stmp="$STATS.tmp.$$"
+  jq '.total_findings = (.total_findings - 1 | if . < 0 then 0 else . end)' \
+    "$STATS" >"$stmp" 2>/dev/null && mv "$stmp" "$STATS" || /bin/rm -f "$stmp"
+
+  echo "Deleted $full_id"
+}
+
+cmd_stats() {
+  ensure_store
+  if [ ! -f "$STATS" ]; then echo "No stats yet."; return 0; fi
+  local total
+  total="$(jq -r '.total_findings' "$STATS")"
+  echo "agent-findings store: $AGENT_FINDINGS_HOME"
+  echo "Total findings: $total"
+  echo "Last write:     $(jq -r '.last_write // "never"' "$STATS")"
+  echo "Last sync:      $(jq -r '.last_sync // "never"' "$STATS")"
+  echo
+  echo "Top task types:"
+  jq -r '.top_task_types[]? | "  \(.count)\t\(.task_type)"' "$STATS"
+  echo
+  echo "Top tags:"
+  jq -r '.top_tags[]? | "  \(.count)\t\(.tag)"' "$STATS"
+}
+
+cmd_reindex() {
+  ensure_store
+  local tmp_stats now prev_sync entries f
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  prev_sync="$(jq -r '.last_sync // ""' "$STATS" 2>/dev/null)"
+  mkdir -p "$AGENT_FINDINGS_HOME/meta"
+
+  # Build one index-entry object per finding file (carrying its real path),
+  # then aggregate counts. Looping keeps the path attached reliably.
+  entries="$AGENT_FINDINGS_HOME/.reindex.$$"
+  : >"$entries"
+  while IFS= read -r f; do
+    jq -c --arg path "$f" '{
+        id, task_type, language: (.language // "none"),
+        tags: (.tags // []), confidence: (.confidence // 0),
+        timestamp, path: $path
+      }' "$f" 2>/dev/null >>"$entries"
+  done < <(find "$AGENT_FINDINGS_HOME/findings" -type f -name '*.json' 2>/dev/null)
+
+  jq -s '
+      {
+        task_types: ( map(.task_type) | group_by(.) | map({key: .[0], value: length}) | from_entries ),
+        tags: ( [ .[].tags[]? ] | group_by(.) | map({key: .[0], value: length}) | from_entries ),
+        findings: .
+      }' "$entries" >"$INDEX" 2>/dev/null \
+    || printf '%s\n' '{"task_types":{},"tags":{},"findings":[]}' >"$INDEX"
+  rm -f "$entries"
+
+  # Rebuild stats from the fresh index.
+  tmp_stats="$STATS.tmp.$$"
+  jq --arg now "$now" --arg sync "$prev_sync" '
+      {
+        total_findings: (.findings | length),
+        top_task_types: (.task_types | to_entries | sort_by(-.value) | .[0:10]
+                         | map({task_type: .key, count: .value})),
+        top_tags: (.tags | to_entries | sort_by(-.value) | .[0:10]
+                  | map({tag: .key, count: .value})),
+        last_write: $now,
+        last_sync: (if $sync == "" then null else $sync end)
+      }' "$INDEX" >"$tmp_stats" 2>/dev/null && mv "$tmp_stats" "$STATS" || rm -f "$tmp_stats"
+
+  echo "Reindexed: $(jq -r '.total_findings' "$STATS") finding(s)."
+}
+
+cmd_sync() {
+  # Stub for the future shared-remote layer. See README "The sync layer".
+  cat <<'EOF'
+agent-findings sync — not implemented yet (stub).
+
+Planned: turn the local store into a node on a shared knowledge network.
+
+  agent-findings sync --remote <git-url>   link a shared findings repo
+  agent-findings sync push                 publish your local findings
+  agent-findings sync pull                 merge in the community's findings
+
+The store is already designed for it: findings are content-addressed by UUID
+and immutable, so a sync is a set-union of {id}.json files plus an index
+rebuild — no merge conflicts. Until this ships, you can DIY:
+
+  git -C ~/.agent-findings init && git -C ~/.agent-findings add findings \
+    && git -C ~/.agent-findings commit -m "findings"   # then push anywhere
+
+Tracking: contributions welcome — see CONTRIBUTING in the README.
+EOF
+}
+
+main() {
+  local sub="${1:-help}"; shift || true
+  case "$sub" in
+    list)            cmd_list "$@" ;;
+    show)            cmd_show "$@" ;;
+    search)          cmd_search "$@" ;;
+    delete)          cmd_delete "$@" ;;
+    stats)           cmd_stats "$@" ;;
+    reindex)         cmd_reindex "$@" ;;
+    sync)            cmd_sync "$@" ;;
+    help|-h|--help)  usage ;;
+    *)               die "unknown command '$sub' (try: agent-findings help)" ;;
+  esac
+}
+
+main "$@"
