@@ -171,7 +171,7 @@ user:  /exit   ← guard sees sentinel, exits cleanly
 
 To skip distillation for a session: set `AGENT_FINDINGS_ENABLED=0` temporarily, or just type `/exit` twice (the guard message tells you how).
 
-The `findings-writer.sh` Stop hook is also present but is a no-op unless `AGENT_FINDINGS_ENABLED=1` — it exists for Codex compatibility where the `/distill` skill isn't available.
+The `findings-writer.sh` Stop hook is also present but is a no-op unless `AGENT_FINDINGS_ENABLED=1` — it exists for Codex compatibility where the `/distill` skill isn't available. For Codex users, the Stop hook calls `claude -p` for distillation; starting June 15 2026, `claude -p` draws from Agent SDK credits rather than your subscription, so Codex distillation has a small per-session cost.
 
 ---
 
