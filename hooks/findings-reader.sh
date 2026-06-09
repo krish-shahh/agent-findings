@@ -28,7 +28,7 @@ payload="$(cat)"
 prompt="$(printf '%s' "$payload" | jq -r '.prompt // ""' 2>/dev/null)"
 [ -n "${prompt// /}" ] || exit 0
 
-# Tokenize: lowercase, split on non-alphanumerics, keep tokens >= 3 chars, dedupe.
+# Tokenize: lowercase, split on non-alphanumerics, keep tokens >= 4 chars, dedupe.
 tokens_json="$(printf '%s' "$prompt" \
   | tr 'A-Z' 'a-z' \
   | tr -c 'a-z0-9' '\n' \

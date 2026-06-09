@@ -27,17 +27,23 @@ is a reference implementation.
 
 ## How it works
 
-```
-                 ┌──────────────────────── a Claude Code session ───────────────────────┐
-   user prompt → │  [UserPromptSubmit]                                  [Stop]           │
-                 │   findings-reader.sh                              findings-writer.sh  │
-                 │        │                                                  │           │
-                 │   retrieve top-3 relevant                      distill the session    │
-                 │   findings, inject as context                  into ONE finding       │
-                 └────────┼──────────────────────────────────────────────────┼──────────┘
-                          │                                                  │
-                          ▼                                                  ▼
-                  ~/.agent-findings/index.json  ◀──────────  ~/.agent-findings/findings/{task_type}/{uuid}.json
+```mermaid
+sequenceDiagram
+    participant P as user prompt
+    participant R as findings-reader.sh
+    participant S as ~/.agent-findings
+    participant C as claude
+    participant W as findings-writer.sh
+
+    P->>R: UserPromptSubmit hook
+    R->>S: score index by tags + task_type
+    S-->>R: top 3 findings
+    R-->>C: inject prior knowledge block
+    P-->>C: original prompt
+    Note over C: executes task
+    C->>W: Stop hook
+    W-->>W: distill session (claude -p, detached)
+    W->>S: write {uuid}.json · reindex
 ```
 
 - **`findings-reader.sh`** (pre-task / `UserPromptSubmit`) — tokenizes the
@@ -124,11 +130,16 @@ on the machine. Nothing project-specific is written into your repos.
 
 ## Install
 
-Requires **`jq`** and the **`claude`** CLI (the distiller). On macOS:
-`brew install jq`.
+Requires **`jq`** and the **`claude`** CLI. On macOS: `brew install jq`.
 
 ```bash
-git clone https://github.com/<you>/agent-findings.git
+curl -fsSL https://raw.githubusercontent.com/krish-shahh/agent-findings/main/install.sh | bash
+```
+
+Or clone if you want to browse or modify the scripts first:
+
+```bash
+git clone https://github.com/krish-shahh/agent-findings.git
 cd agent-findings
 ./install.sh
 ```
@@ -153,11 +164,13 @@ Remove everything (findings are kept) with `./uninstall.sh`.
 ## CLI
 
 ```bash
-agent-findings list [N]     # recent findings (default 10)
-agent-findings show <id>    # full finding by id or id-prefix
-agent-findings stats        # store statistics
-agent-findings reindex      # rebuild index.json + stats.json from the files
-agent-findings sync         # share with a remote store (stub — see below)
+agent-findings list [N]        # recent findings (default 10)
+agent-findings show <id>       # full finding by id or id-prefix
+agent-findings search <query>  # find findings matching a query string
+agent-findings delete <id>     # remove a finding by id or id-prefix
+agent-findings stats           # store statistics
+agent-findings reindex         # rebuild index.json + stats.json from the files
+agent-findings sync            # share with a remote store (stub — see below)
 agent-findings help
 ```
 
