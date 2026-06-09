@@ -29,6 +29,9 @@ printf '%s\n' '{"task_types":{},"tags":{},"findings":[]}' > "$AGENT_FINDINGS_HOM
 printf '%s\n' '{"total_findings":0,"top_task_types":[],"top_tags":[],"last_write":null,"last_sync":null}' \
   > "$AGENT_FINDINGS_HOME/meta/stats.json"
 
+# Unset API keys so tests always hit the stubbed claude CLI, never a live API.
+unset ANTHROPIC_API_KEY OPENAI_API_KEY
+
 # stub `claude`: prints whatever $STUB_OUT holds (so each test controls the finding)
 STUBDIR="$(mktemp -d)"
 cat > "$STUBDIR/claude" <<'EOF'

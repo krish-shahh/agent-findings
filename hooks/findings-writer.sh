@@ -30,11 +30,49 @@ log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG" 2>/dev/n
 # Runs with AGENT_FINDINGS_DISTILL=1 set so the nested `claude` call's own Stop
 # hook short-circuits (see guard at the bottom) and we don't recurse forever.
 # ---------------------------------------------------------------------------
+# Call a model for distillation.
+# Priority: ANTHROPIC_API_KEY → OPENAI_API_KEY → claude CLI (fallback).
+call_model() {
+  local prompt="$1" body response
+
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    body="$(jq -cn --arg p "$prompt" \
+      '{"model":"claude-haiku-4-5-20251001","max_tokens":1024,"messages":[{"role":"user","content":$p}]}')"
+    response="$(printf '%s' "$body" \
+      | curl -sf https://api.anthropic.com/v1/messages \
+          -H "x-api-key: $ANTHROPIC_API_KEY" \
+          -H "anthropic-version: 2023-06-01" \
+          -H "content-type: application/json" \
+          --data-binary @- 2>>"$LOG")"
+    printf '%s' "$response" | jq -r '.content[0].text // empty' 2>/dev/null
+    return
+  fi
+
+  if [ -n "${OPENAI_API_KEY:-}" ]; then
+    body="$(jq -cn --arg p "$prompt" \
+      '{"model":"gpt-4o-mini","max_tokens":1024,"messages":[{"role":"user","content":$p}]}')"
+    response="$(printf '%s' "$body" \
+      | curl -sf https://api.openai.com/v1/chat/completions \
+          -H "Authorization: Bearer $OPENAI_API_KEY" \
+          -H "Content-Type: application/json" \
+          --data-binary @- 2>>"$LOG")"
+    printf '%s' "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null
+    return
+  fi
+
+  if command -v claude >/dev/null 2>&1; then
+    printf '%s\n' "$prompt" | claude -p 2>>"$LOG"
+    return
+  fi
+
+  log "skip: set ANTHROPIC_API_KEY or OPENAI_API_KEY (or install claude CLI)"
+  return 1
+}
+
 do_distill() {
   local transcript="$1" session="$2" cwd="$3" agent="${4:-claude-code}"
 
-  command -v jq >/dev/null 2>&1     || { log "skip: jq not found"; return 0; }
-  command -v claude >/dev/null 2>&1 || { log "skip: claude CLI not found"; return 0; }
+  command -v jq >/dev/null 2>&1 || { log "skip: jq not found"; return 0; }
 
   # Codex doesn't send transcript_path — locate session file by session_id instead.
   if [ -z "$transcript" ] && [ -n "$session" ]; then
@@ -105,8 +143,7 @@ PROMPT
 )
 
   local raw
-  raw="$( { printf '%s\n\n' "$instructions"; printf '%s\n' "$convo"; } \
-            | claude -p 2>>"$LOG" )"
+  raw="$(call_model "$(printf '%s\n\n%s\n' "$instructions" "$convo")")" || return 0
 
   if [ -z "$raw" ]; then
     log "skip: empty model output"
