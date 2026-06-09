@@ -259,6 +259,95 @@ check "codex install: store seeded"                   \
 
 $RM -rf "$CODEX_INST_HOME"
 
+# --- 16. reader: CWD boost --------------------------------------------------
+echo "[16] reader: CWD-matching findings rank higher"
+
+CWD_STORE="$(mktemp -d)/cwd-store"
+mkdir -p "$CWD_STORE/findings" "$CWD_STORE/meta"
+printf '%s\n' '{"task_types":{},"tags":{},"findings":[]}' > "$CWD_STORE/index.json"
+printf '%s\n' '{"total_findings":0,"top_task_types":[],"top_tags":[],"last_write":null,"last_sync":null}' \
+  > "$CWD_STORE/meta/stats.json"
+
+# Write two findings with same tags but different cwds.
+export STUB_OUT='{"task_type":"cwd-boost-test","language":"none","what_worked":"cwd-other-result","what_failed":"","better_exit_condition":"","tags":["cwd-boost-test"],"confidence":0.8}'
+AGENT_FINDINGS_HOME="$CWD_STORE" AGENT_FINDINGS_DISTILL=1 \
+  "$WRITER" --distill "$(mk_transcript)" "sess-cwd-beta" "/proj/beta"
+
+export STUB_OUT='{"task_type":"cwd-boost-test","language":"none","what_worked":"cwd-match-result","what_failed":"","better_exit_condition":"","tags":["cwd-boost-test"],"confidence":0.8}'
+AGENT_FINDINGS_HOME="$CWD_STORE" AGENT_FINDINGS_DISTILL=1 \
+  "$WRITER" --distill "$(mk_transcript)" "sess-cwd-alpha" "/proj/alpha"
+
+# Query with cwd matching alpha; TOP_N=1 so only the winner appears.
+cwd_out="$(printf '%s' '{"prompt":"cwd-boost-test","cwd":"/proj/alpha"}' \
+  | AGENT_FINDINGS_HOME="$CWD_STORE" AGENT_FINDINGS_TOP_N=1 "$READER")"
+check "CWD-matching finding wins ranking" \
+  "printf '%s' \"\$cwd_out\" | jq -r .hookSpecificOutput.additionalContext | grep -q 'cwd-match-result'"
+
+# Flip cwd to beta — the beta finding should now win.
+cwd_out2="$(printf '%s' '{"prompt":"cwd-boost-test","cwd":"/proj/beta"}' \
+  | AGENT_FINDINGS_HOME="$CWD_STORE" AGENT_FINDINGS_TOP_N=1 "$READER")"
+check "CWD boost follows active project" \
+  "printf '%s' \"\$cwd_out2\" | jq -r .hookSpecificOutput.additionalContext | grep -q 'cwd-other-result'"
+
+$RM -rf "$(dirname "$CWD_STORE")"
+
+# --- 17. reader: age decay --------------------------------------------------
+echo "[17] reader: newer findings score higher than old ones"
+
+DECAY_STORE="$(mktemp -d)/decay-store"
+mkdir -p "$DECAY_STORE/findings" "$DECAY_STORE/meta"
+printf '%s\n' '{"task_types":{},"tags":{},"findings":[]}' > "$DECAY_STORE/index.json"
+printf '%s\n' '{"total_findings":0,"top_task_types":[],"top_tags":[],"last_write":null,"last_sync":null}' \
+  > "$DECAY_STORE/meta/stats.json"
+
+# Write the "old" finding first; overwrite its timestamp to a distant past date.
+export STUB_OUT='{"task_type":"decay-test","language":"none","what_worked":"old-result","what_failed":"","better_exit_condition":"","tags":["decay-test"],"confidence":0.9}'
+AGENT_FINDINGS_HOME="$DECAY_STORE" AGENT_FINDINGS_DISTILL=1 \
+  "$WRITER" --distill "$(mk_transcript)" "sess-decay-old" "/tmp"
+OLD_FILE="$(find "$DECAY_STORE/findings" -name '*.json' | head -1)"
+jq '.timestamp = "2020-01-01T00:00:00Z"' "$OLD_FILE" > "$OLD_FILE.tmp" && mv "$OLD_FILE.tmp" "$OLD_FILE"
+AGENT_FINDINGS_HOME="$DECAY_STORE" "$CLI" reindex >/dev/null
+
+# Write the fresh finding.
+export STUB_OUT='{"task_type":"decay-test","language":"none","what_worked":"fresh-result","what_failed":"","better_exit_condition":"","tags":["decay-test"],"confidence":0.9}'
+AGENT_FINDINGS_HOME="$DECAY_STORE" AGENT_FINDINGS_DISTILL=1 \
+  "$WRITER" --distill "$(mk_transcript)" "sess-decay-new" "/tmp"
+
+decay_out="$(printf '%s' '{"prompt":"decay-test"}' \
+  | AGENT_FINDINGS_HOME="$DECAY_STORE" AGENT_FINDINGS_TOP_N=1 "$READER")"
+check "fresh finding outranks ancient one" \
+  "printf '%s' \"\$decay_out\" | jq -r .hookSpecificOutput.additionalContext | grep -q 'fresh-result'"
+
+$RM -rf "$(dirname "$DECAY_STORE")"
+
+# --- 18. writer: store cap (AGENT_FINDINGS_MAX) -----------------------------
+echo "[18] writer: store cap prunes lowest-scoring findings"
+
+CAP_STORE="$(mktemp -d)/cap-store"
+mkdir -p "$CAP_STORE/findings" "$CAP_STORE/meta"
+printf '%s\n' '{"task_types":{},"tags":{},"findings":[]}' > "$CAP_STORE/index.json"
+printf '%s\n' '{"total_findings":0,"top_task_types":[],"top_tags":[],"last_write":null,"last_sync":null}' \
+  > "$CAP_STORE/meta/stats.json"
+
+# Write 3 findings so the store is exactly at MAX=3.
+for i in 1 2 3; do
+  export STUB_OUT="{\"task_type\":\"cap-test\",\"language\":\"none\",\"what_worked\":\"cap-result-$i\",\"what_failed\":\"\",\"better_exit_condition\":\"\",\"tags\":[\"cap-tag\"],\"confidence\":0.$(( 5 + i ))}"
+  AGENT_FINDINGS_HOME="$CAP_STORE" AGENT_FINDINGS_MAX=3 AGENT_FINDINGS_DISTILL=1 \
+    "$WRITER" --distill "$(mk_transcript)" "sess-cap-$i" "/cap"
+done
+cap_count="$(jq '.findings | length' "$CAP_STORE/index.json")"
+check "at MAX: 3 findings present"       "[ \"$cap_count\" -eq 3 ]"
+
+# 4th finding with MAX=3 must trigger prune — count stays at 3.
+export STUB_OUT='{"task_type":"cap-test","language":"none","what_worked":"cap-result-4","what_failed":"","better_exit_condition":"","tags":["cap-tag"],"confidence":0.9}'
+AGENT_FINDINGS_HOME="$CAP_STORE" AGENT_FINDINGS_MAX=3 AGENT_FINDINGS_DISTILL=1 \
+  "$WRITER" --distill "$(mk_transcript)" "sess-cap-4" "/cap"
+cap_count="$(jq '.findings | length' "$CAP_STORE/index.json")"
+check "after prune: still 3 findings"    "[ \"$cap_count\" -eq 3 ]"
+check "store cap noted in writer.log"    "grep -q 'pruned (store cap)' \"$CAP_STORE/meta/writer.log\""
+
+$RM -rf "$(dirname "$CAP_STORE")"
+
 # --- cleanup ----------------------------------------------------------------
 $RM -rf "$(dirname "$AGENT_FINDINGS_HOME")" "$STUBDIR"
 

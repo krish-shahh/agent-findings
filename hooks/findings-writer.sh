@@ -21,6 +21,8 @@ AGENT_FINDINGS_HOME="${AGENT_FINDINGS_HOME:-$HOME/.agent-findings}"
 SCHEMA_VERSION="1.0"
 CONFIDENCE_FLOOR="0.5"
 TRANSCRIPT_BUDGET_BYTES="${AGENT_FINDINGS_TRANSCRIPT_BYTES:-60000}"
+AGENT_FINDINGS_MAX="${AGENT_FINDINGS_MAX:-500}"
+AGENT_FINDINGS_HALF_LIFE_DAYS="${AGENT_FINDINGS_HALF_LIFE_DAYS:-90}"
 LOG="$AGENT_FINDINGS_HOME/meta/writer.log"
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG" 2>/dev/null; }
@@ -191,6 +193,7 @@ PROMPT
 
   rebuild_index
   rebuild_stats
+  prune_store
   log "wrote $task_type/$uuid.json (confidence $conf)"
   return 0
 }
@@ -213,7 +216,7 @@ rebuild_index() {
     jq -c --arg path "$f" '{
         id, task_type, language: (.language // "none"),
         tags: (.tags // []), confidence: (.confidence // 0),
-        timestamp, path: $path
+        timestamp, cwd: (.source.cwd // ""), path: $path
       }' "$f" 2>/dev/null >>"$entries"
   done < <(find "$AGENT_FINDINGS_HOME/findings" -type f -name '*.json' 2>/dev/null)
   tmp="$index.tmp.$$"
@@ -246,6 +249,34 @@ rebuild_stats() {
         last_write: $now,
         last_sync: (if $sync == "" then null else $sync end)
       }' "$index" >"$tmp" 2>>"$LOG" && mv "$tmp" "$stats" || rm -f "$tmp"
+}
+
+# Remove the lowest-scoring findings when the store exceeds AGENT_FINDINGS_MAX.
+# Score = confidence × age_decay; the weakest, oldest findings are pruned first.
+prune_store() {
+  local count max half_life to_delete f
+  max="$AGENT_FINDINGS_MAX"
+  half_life="$AGENT_FINDINGS_HALF_LIFE_DAYS"
+  count="$(jq '.findings | length' "$AGENT_FINDINGS_HOME/index.json" 2>/dev/null || echo 0)"
+  [ "$count" -le "$max" ] && return 0
+
+  to_delete="$(jq -r --argjson hl "$half_life" --argjson max "$max" '
+    .findings
+    | map(
+        (try pow(2; -(((now - (.timestamp | fromdateiso8601)) / 86400) / $hl)) catch 1) as $decay
+        | . + { _score: ((.confidence // 0) * $decay) }
+      )
+    | sort_by(._score)
+    | .[0:(length - $max)]
+    | .[].path
+  ' "$AGENT_FINDINGS_HOME/index.json" 2>/dev/null)"
+
+  [ -n "$to_delete" ] || return 0
+  while IFS= read -r f; do
+    [ -f "$f" ] && rm -f "$f" && log "pruned (store cap): $f"
+  done <<< "$to_delete"
+  rebuild_index
+  rebuild_stats
 }
 
 # ---------------------------------------------------------------------------
